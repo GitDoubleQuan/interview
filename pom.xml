@@ -10,10 +10,9 @@
     <version>1.0-SNAPSHOT</version>
     <modules>
         <module>arithmetic</module>
-        <module>designpatterns</module>
+        <module>designPattern</module>
+        <module>flink</module>
     </modules>
-
-
 
 
 </project>
