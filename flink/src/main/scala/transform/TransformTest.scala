@@ -1,8 +1,10 @@
 package transform
 
 import org.apache.flink.api.java.functions.KeySelector
+import org.apache.flink.streaming.api.functions.ProcessFunction
 import org.apache.flink.streaming.api.functions.co.CoMapFunction
 import org.apache.flink.streaming.api.scala._
+import org.apache.flink.util.Collector
 import pojo.SensorReading
 
 import scala.collection.immutable.HashSet.HashSet1
@@ -50,6 +52,24 @@ object TransformTest {
       .select("low")
     val highDataStream = splitDataStream
       .select("high")
+
+    //processfunction替代split操作
+    val mintorDs = SensorReadingDStream.process(new ProcessFunction[SensorReading, SensorReading] {
+      val tag = new OutputTag[(String, Double, Long)]("low-temp");
+
+      override def processElement(value: SensorReading, ctx: ProcessFunction[SensorReading, SensorReading]#Context, out: Collector[SensorReading]): Unit = {
+        if (value.temperature > 50.0) {
+          out.collect(value)
+        } else {
+          ctx.output(tag, (value.id, value.temperature, value.timestamp))
+        }
+      }
+    })
+
+    mintorDs.print("high-temp")
+
+    mintorDs.getSideOutput(new OutputTag[(String,Double,Long)]("low-temp")).print("low-temp")
+
 
     //connect可以连接两条数据类型不同的流
     lowDataStream.map(data => (data.id, data.temperature))
