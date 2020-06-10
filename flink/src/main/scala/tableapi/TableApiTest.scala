@@ -5,7 +5,7 @@ import org.apache.flink.api.scala.ExecutionEnvironment
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.table.api.scala._
 import org.apache.flink.table.api.{DataTypes, EnvironmentSettings, TableEnvironment}
-import org.apache.flink.table.descriptors.{Csv, FileSystem, Kafka, OldCsv, Schema}
+import org.apache.flink.table.descriptors.{Csv, Elasticsearch, FileSystem, Json, Kafka, OldCsv, Schema}
 import org.apache.flink.types.Row
 import pojo.SensorReading
 
@@ -63,8 +63,7 @@ object TableApiTest {
     //3.1简单聚合操作
     val table = blinkStreamTableEnv.from("inputTable")
       .where('id === "sensor_1")
-      .groupBy('id)
-      .select('id, 'temperature.count as 'cnt)
+      .select('id, 'temperature)
 
     val table1 = blinkStreamTableEnv.sqlQuery(
       """
@@ -89,12 +88,68 @@ object TableApiTest {
     val sourceTable = blinkStreamTableEnv.fromDataStream(source, 'id, 'temperature as 'temp, 'timestamp as 'ts)
     sourceTable.printSchema()
     //4.3基于dataStream创建view,跟创建表一样，schema可以不加，默认一一对应
-    blinkStreamTableEnv.createTemporaryView("source_view",source,'id, 'temperature as 'temp, 'timestamp as 'ts)
+    blinkStreamTableEnv.createTemporaryView("source_view", source, 'id, 'temperature as 'temp, 'timestamp as 'ts)
     //4.4基于table创建view
-    blinkStreamTableEnv.createTemporaryView("source_view2",sourceTable)
+    blinkStreamTableEnv.createTemporaryView("source_view2", sourceTable)
 
 
+    //5 table sink
+    //5.1输出到kafka
+    //kafka作为消息队列只支持append流
+    blinkStreamTableEnv.connect(
+      new Kafka()
+        .version("0.11")
+        .topic("sinkTest")
+        .property("zookeeper.connect", "localhost:2181")
+        .property("bootstrap.servers", "localhost:9092")
+    )
+      .withFormat(new Csv())
+      .withSchema(new Schema()
+        .field("id", DataTypes.STRING())
+        .field("cnt", DataTypes.DOUBLE())
+      )
+      .createTemporaryTable("kafkaOutputTable")
 
+    table.insertInto("kafkaOutputTable")
+
+
+    //5.2输出到es es是支持upsert模式的
+    blinkStreamTableEnv.connect(
+      new Elasticsearch()
+        .version("6")
+        .host("localhost", 9200, "http")
+        .index("sensor")
+        .documentType("temp")
+    )
+      .inUpsertMode() // 指定是 Upsert 模式
+      .withFormat(new Json())
+      .withSchema(new Schema()
+        .field("id", DataTypes.STRING())
+        .field("count", DataTypes.BIGINT())
+      )
+      .createTemporaryTable("esOutputTable")
+
+    table1.insertInto("esOutputTable")
+
+
+    //5.3输出到mysql
+    val sinkDDL: String =
+      """
+        |create table jdbcOutputTable (
+        |  id varchar(20) not null,
+        |  cnt bigint not null
+        |) with (
+        |  'connector.type' = 'jdbc',
+        |  'connector.url' = 'jdbc:mysql://localhost:3306/test',
+        |  'connector.table' = 'sensor_count',
+        |  'connector.driver' = 'com.mysql.jdbc.Driver',
+        |  'connector.username' = 'root',
+        |  'connector.password' = '123456'
+        |)
+  """.stripMargin
+
+    blinkStreamTableEnv.sqlUpdate(sinkDDL)
+    table1.insertInto("jdbcOutputTable")
 
 
     blinkStreamTableEnv.toRetractStream[(String, Double)](table).print()

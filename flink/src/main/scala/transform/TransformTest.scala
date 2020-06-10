@@ -68,7 +68,10 @@ object TransformTest {
 
     mintorDs.print("high-temp")
 
-    mintorDs.getSideOutput(new OutputTag[(String,Double,Long)]("low-temp")).print("low-temp")
+    mintorDs
+      .getSideOutput(new OutputTag[(String,Double,Long)]("low-temp"))
+      .map(_._1)
+      .print("low-temp")
 
 
     //connect可以连接两条数据类型不同的流
