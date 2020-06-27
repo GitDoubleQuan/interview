@@ -42,9 +42,22 @@ object TimeAndWindowTest {
     //extractTimestamp()中提取的事件时间会覆盖已有的字段
     val sourceTable = blinkStreamTableEnv.fromDataStream(sourceWithEventTime, 'id, 'temperature as 'temp, 'timestamp.rowtime as 'ts)
 
+    //3.table api实现Group Window
+    val resultTable = sourceTable.window(Tumble over 10.second on 'ts as 'w)
+      .groupBy('id, 'w)
+      .select('id, 'w.end, 'temp.count)
+    //4.flink sql实现Group Window
+    blinkStreamTableEnv.createTemporaryView("sensor",sourceTable)
+    val resultSqlTable = blinkStreamTableEnv.sqlQuery(
+      """
+        |select id,tumble_end(ts,interval '10' second),count(id)
+        |from sensor
+        |group by id,tumble(ts,interval '10' second)
+        |""".stripMargin)
 
-    sourceTable.printSchema()
-    sourceTable.toAppendStream[Row].print()
+
+    resultTable.toRetractStream[Row].print("table api ==>")
+    resultSqlTable.toAppendStream[Row].print("flink sql ==>")
 
     env.execute()
 
